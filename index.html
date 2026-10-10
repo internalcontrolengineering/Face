@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMOTION//SCAN — MediaPipe Edition</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --cyan: #00e5ff; --pink: #ff2d95; --green: #00ff9d;
+    --yellow: #ffd93d; --red: #ff4757;
+    --bg: #05070d; --panel: #0a1018; --border: #12293d;
+    --text: #c5d3e0; --dim: #5c7a8f;
+  }
+  body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .app { display: grid; grid-template-columns: 1fr 380px; min-height: 100vh; }
+  @media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; background: #000; display: flex; align-items: center; justify-content: center; min-height: 60vh; overflow: hidden; }
+  video, canvas#overlay { position: absolute; max-width: 100%; max-height: 100%; object-fit: contain; }
+  video { transform: scaleX(-1); }
+  canvas#overlay { transform: scaleX(-1); }
+
+  .hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  .corner { position: absolute; width: 40px; height: 40px; border: 2px solid var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+  .corner.tl { top: 16px; left: 16px; border-right: none; border-bottom: none; }
+  .corner.tr { top: 16px; right: 16px; border-left: none; border-bottom: none; }
+  .corner.bl { bottom: 16px; left: 16px; border-right: none; border-top: none; }
+  .corner.br { bottom: 16px; right: 16px; border-left: none; border-top: none; }
+  .hud-top { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); font-size: 11px; letter-spacing: 3px; color: var(--cyan); text-shadow: 0 0 10px var(--cyan); display: flex; gap: 20px; }
+  .rec { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); animation: blink 1s infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .panel { background: var(--panel); border-left: 1px solid var(--border); padding: 18px; display: flex; flex-direction: column; gap: 14px; max-height: 100vh; overflow-y: auto; }
+  .panel::-webkit-scrollbar { width: 6px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .logo { font-size: 15px; letter-spacing: 3px; color: var(--cyan); text-shadow: 0 0 12px var(--cyan); }
+  .logo span { color: var(--pink); }
+  .sub { font-size: 10px; color: var(--dim); letter-spacing: 1px; line-height: 1.5; }
+  .disclaimer { font-size: 9px; color: var(--yellow); background: rgba(255,217,61,0.08); border: 1px solid rgba(255,217,61,0.3); padding: 8px 10px; border-radius: 4px; line-height: 1.5; }
+
+  .section-title { font-size: 10px; color: var(--cyan); letter-spacing: 2px; text-transform: uppercase; padding-bottom: 4px; border-bottom: 1px dashed var(--border); }
+
+  .emotions { display: flex; flex-direction: column; gap: 6px; }
+  .emo-row { display: grid; grid-template-columns: 24px 1fr 44px; align-items: center; gap: 8px; font-size: 11px; }
+  .emo-icon { font-size: 16px; text-align: center; }
+  .bar { height: 8px; background: #0d1a24; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+  .fill { height: 100%; width: 0%; transition: width 0.2s ease; }
+  .fill.joy { background: linear-gradient(90deg, #ffd93d, #ff9a00); }
+  .fill.sad { background: linear-gradient(90deg, #4a90e2, #2d5f9e); }
+  .fill.ang { background: linear-gradient(90deg, #ff4757, #c41e2f); }
+  .fill.sur { background: linear-gradient(90deg, #00e5ff, #0088aa); }
+  .fill.fea { background: linear-gradient(90deg, #a855f7, #6b21a8); }
+  .fill.dis { background: linear-gradient(90deg, #94a3b8, #475569); }
+  .fill.neu { background: linear-gradient(90deg, #00ff9d, #00885c); }
+  .val { text-align: right; color: var(--dim); font-size: 10px; }
+
+  .tension-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; background: #050a10; border: 1px solid var(--border); border-radius: 8px; }
+  canvas#gauge { width: 100%; max-width: 260px; height: 130px; }
+  .tension-value { font-size: 24px; font-weight: bold; text-shadow: 0 0 15px currentColor; letter-spacing: 2px; }
+  .tension-label { font-size: 10px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; }
+
+  .metrics { display: flex; flex-direction: column; gap: 5px; }
+  .m-row { display: flex; justify-content: space-between; padding: 5px 10px; background: #0a1520; border-left: 2px solid var(--cyan); border-radius: 3px; font-size: 11px; }
+  .m-row .k { color: var(--dim); }
+  .m-row .v { color: var(--cyan); font-weight: bold; }
+
+  .btn { padding: 10px; background: transparent; border: 1px solid var(--green); color: var(--green); font-family: inherit; font-size: 11px; letter-spacing: 2px; cursor: pointer; border-radius: 6px; transition: all 0.2s; text-transform: uppercase; }
+  .btn:hover { background: var(--green); color: #000; box-shadow: 0 0 20px var(--green); }
+  .btn.pink { border-color: var(--pink); color: var(--pink); }
+  .btn.pink:hover { background: var(--pink); color: #000; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #log { font-size: 10px; color: var(--dim); line-height: 1.6; max-height: 120px; overflow-y: auto; padding: 8px; background: #050a10; border: 1px solid var(--border); border-radius: 4px; }
+  #log .ok { color: var(--green); }
+  #log .warn { color: var(--yellow); }
+  #log .err { color: var(--red); }
+  #status { font-size: 11px; padding: 8px 12px; background: #0a1520; border-radius: 4px; border-left: 3px solid var(--cyan); color: var(--cyan); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div class="hud">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="hud-top">
+        <span><span class="rec"></span>REC</span>
+        <span id="fps">-- FPS</span>
+        <span id="resolution">--</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div>
+      <div class="logo">EMOTION<span>//</span>SCAN</div>
+      <p class="sub">Análisis facial con MediaPipe Tasks · 100% local</p>
+    </div>
+
+    <div class="disclaimer">
+      ⚠ Mide <b>tensión y emociones aparentes</b>. NO detecta mentiras. Ningún sistema puede hacerlo de forma fiable.
+    </div>
+
+    <div id="status">Estado: esperando inicio…</div>
+
+    <div class="section-title">Emociones</div>
+    <div class="emotions" id="emotions">
+      <div class="emo-row"><div class="emo-icon">😄</div><div class="bar"><div class="fill joy" data-emo="joy"></div></div><div class="val" data-val="joy">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">😐</div><div class="bar"><div class="fill neu" data-emo="neutral"></div></div><div class="val" data-val="neutral">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">😢</div><div class="bar"><div class="fill sad" data-emo="sad"></div></div><div class="val" data-val="sad">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">😠</div><div class="bar"><div class="fill ang" data-emo="angry"></div></div><div class="val" data-val="angry">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">😲</div><div class="bar"><div class="fill sur" data-emo="surprise"></div></div><div class="val" data-val="surprise">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">😨</div><div class="bar"><div class="fill fea" data-emo="fear"></div></div><div class="val" data-val="fear">0%</div></div>
+      <div class="emo-row"><div class="emo-icon">🤢</div><div class="bar"><div class="fill dis" data-emo="disgust"></div></div><div class="val" data-val="disgust">0%</div></div>
+    </div>
+
+    <div class="section-title">Índice de tensión</div>
+    <div class="tension-wrap">
+      <canvas id="gauge" width="260" height="130"></canvas>
+      <div class="tension-value" id="tensionValue">0%</div>
+      <div class="tension-label" id="tensionLabel">SIN DATOS</div>
+    </div>
+
+    <div class="section-title">Métricas</div>
+    <div class="metrics">
+      <div class="m-row"><span class="k">Parpadeos/min</span><span class="v" id="mBlink">—</span></div>
+      <div class="m-row"><span class="k">Tensión cejas</span><span class="v" id="mBrow">—</span></div>
+      <div class="m-row"><span class="k">Apertura boca</span><span class="v" id="mMouth">—</span></div>
+      <div class="m-row"><span class="k">Asimetría</span><span class="v" id="mAsym">—</span></div>
+      <div class="m-row"><span class="k">Inclinación</span><span class="v" id="mTilt">—</span></div>
+    </div>
+
+    <button class="btn" id="btnStart">▶ Iniciar cámara</button>
+    <button class="btn pink" id="btnReset">⟲ Reiniciar</button>
+
+    <div id="log"></div>
+  </div>
+</div>
+
+<script type="module">
+// ============================================================
+// EMOTION//SCAN — MediaPipe Tasks (FaceLandmarker)
+// Esta versión NO usa TensorFlow.js, usa MediaPipe directamente.
+// ============================================================
+
+import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18';
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const fpsEl = document.getElementById('fps');
+const resEl = document.getElementById('resolution');
+
+let faceLandmarker = null;
+let stream = null;
+let running = false;
+let lastVideoTime = -1;
+
+const smoothed = { joy:0, neutral:1, sad:0, angry:0, surprise:0, fear:0, disgust:0 };
+let blinkTimes = [];
+let eyesClosed = false;
+let lastBlink = 0;
+let currentTension = 0;
+let framesSinceFace = 0;
+
+function log(msg, cls = '') {
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = '> ' + msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
+}
+function setStatus(msg, color = '#00e5ff') {
+  statusEl.textContent = 'Estado: ' + msg;
+  statusEl.style.color = color;
+  statusEl.style.borderLeftColor = color;
+}
+
+// ---------- Cargar MediaPipe FaceLandmarker ----------
+async function loadFaceLandmarker() {
+  try {
+    setStatus('cargando MediaPipe…', '#ffd93d');
+    log('Inicializando MediaPipe Tasks Vision...');
+
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
+    );
+
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        delegate: 'GPU'
+      },
+      outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: false,
+      runningMode: 'VIDEO',
+      numFaces: 1
+    });
+
+    log('FaceLandmarker listo', 'ok');
+    setStatus('modelo listo · pulsa Iniciar cámara', '#00ff9d');
+  } catch (e) {
+    console.error(e);
+    log('ERROR: ' + e.message, 'err');
+    setStatus('error cargando modelo', '#ff4757');
+  }
+}
+
+// ---------- Cámara ----------
+async function startCamera() {
+  if (stream) return;
+  setStatus('pidiendo permiso…', '#ffd93d');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false
+    });
+    video.srcObject = stream;
+
+    await new Promise((res) => {
+      if (video.readyState >= 2) return res();
+      video.onloadedmetadata = () => res();
+    });
+    await video.play();
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    log('Cámara OK: ' + video.videoWidth + '×' + video.videoHeight, 'ok');
+    setStatus('analizando…', '#00ff9d');
+
+    running = true;
+    requestAnimationFrame(loop);
+  } catch (e) {
+    console.error(e);
+    log('Error cámara: ' + e.message, 'err');
+    setStatus('error de cámara', '#ff4757');
+  }
+}
+
+function resizeCanvas() {
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  resEl.textContent = canvas.width + '×' + canvas.height;
+}
+
+// ---------- Geometría ----------
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function ear(kp, side) {
+  const sup = kp[side === 'l' ? 159 : 386];
+  const inf = kp[side === 'l' ? 145 : 374];
+  const inC = kp[side === 'l' ? 33 : 362];
+  const outC = kp[side === 'l' ? 133 : 263];
+  return dist(sup, inf) / (dist(inC, outC) || 1);
+}
+
+function mouthOpen(kp) {
+  return dist(kp[13], kp[14]) / (dist(kp[61], kp[291]) || 1);
+}
+
+function smile(kp) {
+  const w = dist(kp[61], kp[291]) || 1;
+  const centerY = (kp[61].y + kp[291].y) / 2;
+  const upY = kp[13].y;
+  return Math.abs(upY - centerY) / w;
+}
+
+function browT(kp) {
+  const faceH = dist(kp[10], kp[152]) || 1;
+  const dL = dist(kp[105], kp[159]);
+  const dR = dist(kp[334], kp[386]);
+  return ((dL + dR) / 2) / faceH;
+}
+
+function browAng(kp) {
+  const innerY = (kp[55].y + kp[285].y) / 2;
+  const outerY = (kp[70].y + kp[300].y) / 2;
+  const faceH = dist(kp[10], kp[152]) || 1;
+  return (innerY - outerY) / faceH;
+}
+
+function headTilt(kp) {
+  return Math.atan2(kp[263].y - kp[33].y, kp[263].x - kp[33].x) * 180 / Math.PI;
+}
+
+function asymmetry(kp) {
+  const faceW = dist(kp[234], kp[454]) || 1;
+  const dyM = Math.abs(kp[61].y - kp[291].y);
+  const dyB = Math.abs(kp[105].y - kp[334].y);
+  return ((dyM + dyB) / 2) / faceW;
+}
+
+// ---------- Emociones ----------
+function estimateEmotions(kp) {
+  const e = (ear(kp, 'l') + ear(kp, 'r')) / 2;
+  const mo = mouthOpen(kp);
+  const sm = smile(kp);
+  const bt = browT(kp);
+  const ba = browAng(kp);
+
+  const emo = { joy:0, neutral:0, sad:0, angry:0, surprise:0, fear:0, disgust:0 };
+
+  if (e > 0.26 && mo > 0.20) emo.surprise = Math.min(1, (e - 0.24) * 4 + mo);
+  if (e > 0.28 && ba > 0.005 && mo < 0.20) emo.fear = Math.min(1, (e - 0.26) * 3 + ba * 8);
+  if (sm > 0.04) emo.joy = Math.min(1, sm * 10);
+  if (bt < 0.11) emo.angry = Math.min(1, (0.12 - bt) * 10);
+  if (bt < 0.12 && mo > 0.04 && mo < 0.20 && sm < 0.03) emo.disgust = Math.min(1, (0.13 - bt) * 6);
+  if (ba > 0.003 && sm < 0.04 && e < 0.28) emo.sad = Math.min(1, ba * 8);
+
+  const sum = emo.joy + emo.sad + emo.angry + emo.surprise + emo.fear + emo.disgust;
+  emo.neutral = sum < 0.2 ? 1 - sum : Math.max(0, 0.2 - sum * 0.2);
+
+  const total = Object.values(emo).reduce((a,b)=>a+b,0) || 1;
+  for (const k in emo) emo[k] = emo[k] / total;
+  return emo;
+}
+
+function computeTension(kp, emo) {
+  const bt = browT(kp);
+  const asym = asymmetry(kp);
+  const tilt = Math.abs(headTilt(kp));
+  let t = 0;
+  t += Math.max(0, 0.13 - bt) * 500;
+  t += asym * 300;
+  t += Math.min(tilt, 20) / 20 * 15;
+  t += (emo.angry + emo.fear + emo.disgust + emo.sad) * 60;
+  return Math.max(0, Math.min(100, t));
+}
+
+// ---------- Gauge ----------
+const gaugeCanvas = document.getElementById('gauge');
+const gctx = gaugeCanvas.getContext('2d');
+
+function drawGauge(value) {
+  const w = gaugeCanvas.width, h = gaugeCanvas.height;
+  gctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h - 15, R = Math.min(w / 2, h) - 20;
+
+  gctx.beginPath();
+  gctx.arc(cx, cy, R, Math.PI, Math.PI * 2);
+  gctx.lineWidth = 12;
+  gctx.strokeStyle = '#0d1a24';
+  gctx.stroke();
+
+  const endA = Math.PI + Math.PI * (value / 100);
+  let color = '#00ff9d';
+  if (value > 70) color = '#ff4757';
+  else if (value > 40) color = '#ffd93d';
+
+  gctx.beginPath();
+  gctx.arc(cx, cy, R, Math.PI, endA);
+  gctx.lineWidth = 12;
+  gctx.strokeStyle = color;
+  gctx.shadowColor = color;
+  gctx.shadowBlur = 15;
+  gctx.stroke();
+  gctx.shadowBlur = 0;
+
+  const a = Math.PI + Math.PI * (value / 100);
+  gctx.beginPath();
+  gctx.moveTo(cx, cy);
+  gctx.lineTo(cx + Math.cos(a) * (R - 15), cy + Math.sin(a) * (R - 15));
+  gctx.strokeStyle = '#fff';
+  gctx.lineWidth = 3;
+  gctx.stroke();
+
+  gctx.beginPath();
+  gctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  gctx.fillStyle = '#00e5ff';
+  gctx.shadowColor = '#00e5ff';
+  gctx.shadowBlur = 12;
+  gctx.fill();
+  gctx.shadowBlur = 0;
+}
+
+function updateEmotionBars(emo) {
+  for (const k in emo) smoothed[k] = smoothed[k] * 0.7 + emo[k] * 0.3;
+  for (const k in smoothed) {
+    const v = Math.round(smoothed[k] * 100);
+    const bar = document.querySelector(`.fill[data-emo="${k}"]`);
+    const val = document.querySelector(`.val[data-val="${k}"]`);
+    if (bar) bar.style.width = v + '%';
+    if (val) val.textContent = v + '%';
+  }
+}
+
+function updateTensionUI(t) {
+  currentTension = currentTension * 0.75 + t * 0.25;
+  drawGauge(currentTension);
+  const val = Math.round(currentTension);
+  const tv = document.getElementById('tensionValue');
+  tv.textContent = val + '%';
+  let label = 'RELAJADO', color = '#00ff9d';
+  if (val > 70) { label = 'MUY ALTO'; color = '#ff4757'; }
+  else if (val > 50) { label = 'ALTO'; color = '#ff9a00'; }
+  else if (val > 30) { label = 'MODERADO'; color = '#ffd93d'; }
+  tv.style.color = color;
+  document.getElementById('tensionLabel').textContent = label;
+}
+
+function updateBlink(kp) {
+  const e = (ear(kp, 'l') + ear(kp, 'r')) / 2;
+  const now = performance.now();
+  if (e < 0.16 && !eyesClosed) {
+    eyesClosed = true;
+  } else if (e > 0.22 && eyesClosed) {
+    eyesClosed = false;
+    if (now - lastBlink > 150) { blinkTimes.push(now); lastBlink = now; }
+  }
+  blinkTimes = blinkTimes.filter(t => t > now - 60000);
+  return blinkTimes.length;
+}
+
+function drawFace(kp) {
+  ctx.fillStyle = 'rgba(0,229,255,0.5)';
+  for (let i = 0; i < kp.length; i += 2) {
+    ctx.beginPath();
+    ctx.arc(kp[i].x, kp[i].y, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const hi = [33, 133, 159, 145, 362, 263, 386, 374, 61, 291, 13, 14, 105, 334, 55, 285, 70, 300, 1, 10, 152, 234, 454, 468, 473];
+  hi.forEach(i => {
+    if (!kp[i]) return;
+    ctx.beginPath();
+    ctx.arc(kp[i].x, kp[i].y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff2d95';
+    ctx.shadowColor = '#ff2d95';
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+
+  const xs = kp.map(p => p.x), ys = kp.map(p => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const c = 16;
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x, y + c); ctx.lineTo(x, y); ctx.lineTo(x + c, y);
+  ctx.moveTo(x + w - c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + c);
+  ctx.moveTo(x, y + h - c); ctx.lineTo(x, y + h); ctx.lineTo(x + c, y + h);
+  ctx.moveTo(x + w - c, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - c);
+  ctx.stroke();
+}
+
+// ---------- Loop ----------
+let lastFrame = performance.now();
+let fpsAcc = 0, fpsCount = 0;
+
+function loop() {
+  if (!running) return;
+  requestAnimationFrame(loop);
+
+  const now = performance.now();
+  const delta = now - lastFrame;
+  lastFrame = now;
+  fpsAcc += delta; fpsCount++;
+  if (fpsAcc > 500) {
+    fpsEl.textContent = Math.round(1000 / (fpsAcc / fpsCount)) + ' FPS';
+    fpsAcc = 0; fpsCount = 0;
+  }
+
+  if (canvas.width !== video.videoWidth) resizeCanvas();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!faceLandmarker) return;
+
+  // Solo procesar si el video tiene un frame nuevo
+  if (video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+
+  try {
+    const results = faceLandmarker.detectForVideo(video, performance.now());
+
+    if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
+      framesSinceFace++;
+      if (framesSinceFace > 30) {
+        document.getElementById('tensionLabel').textContent = 'SIN ROSTRO';
+        setStatus('no se detecta rostro', '#ffd93d');
+      }
+      return;
+    }
+    framesSinceFace = 0;
+    setStatus('analizando…', '#00ff9d');
+
+    const kp = results.faceLandmarks[0].map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height, z: p.z }));
+    drawFace(kp);
+
+    const emo = estimateEmotions(kp);
+    updateEmotionBars(emo);
+    updateTensionUI(computeTension(kp, emo));
+
+    document.getElementById('mBlink').textContent = updateBlink(kp);
+    document.getElementById('mBrow').textContent = (browT(kp) * 1000).toFixed(0);
+    document.getElementById('mMouth').textContent = (mouthOpen(kp) * 100).toFixed(0) + '%';
+    document.getElementById('mAsym').textContent = (asymmetry(kp) * 1000).toFixed(1);
+    document.getElementById('mTilt').textContent = headTilt(kp).toFixed(1) + '°';
+  } catch (e) {
+    console.error(e);
+    log('Error en loop: ' + e.message, 'err');
+    running = false;
+    setStatus('error en bucle', '#ff4757');
+  }
+}
+
+// ---------- Controles ----------
+document.getElementById('btnStart').addEventListener('click', startCamera);
+document.getElementById('btnReset').addEventListener('click', () => {
+  blinkTimes = [];
+  for (const k in smoothed) smoothed[k] = 0;
+  smoothed.neutral = 1;
+  currentTension = 0;
+  drawGauge(0);
+  log('Reiniciado', 'ok');
+});
+
+// ---------- Inicio ----------
+log('EMOTION//SCAN — MediaPipe Edition');
+log('Recordatorio: NO detecta mentiras.', 'warn');
+loadFaceLandmarker();
+</script>
+</body>
+</html>
